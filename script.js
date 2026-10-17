@@ -362,3 +362,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 });
+
+// Stop birthday music when the website is no longer visible
+document.addEventListener("visibilitychange", () => {
+  const music = document.getElementById("birthdayMusic");
+
+  if (document.hidden && music) {
+    music.pause();
+  }
+});
