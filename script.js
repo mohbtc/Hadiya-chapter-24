@@ -21,10 +21,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const finalLetter = document.getElementById("finalLetter");
   const finalBirthday = document.getElementById("finalBirthday");
 
-  let currentScreenIndex = 0;
   let envelopeOpened = false;
   let musicPlaying = false;
   let userPausedMusic = false;
+  let musicStartAttemptInProgress = false;
 
   /*
    * CHAPTER NAVIGATION
@@ -51,8 +51,6 @@ document.addEventListener("DOMContentLoaded", () => {
     targetScreen.classList.add("active");
     targetScreen.setAttribute("aria-hidden", "false");
 
-    currentScreenIndex = targetIndex;
-
     window.scrollTo({
       top: 0,
       behavior: "smooth"
@@ -76,6 +74,8 @@ document.addEventListener("DOMContentLoaded", () => {
         "aria-label",
         "Pause background music"
       );
+
+      musicButton.setAttribute("aria-pressed", "true");
     } else {
       musicIcon.textContent = "♫";
       musicLabel.textContent = "Play music";
@@ -84,32 +84,51 @@ document.addEventListener("DOMContentLoaded", () => {
         "aria-label",
         "Play background music"
       );
+
+      musicButton.setAttribute("aria-pressed", "false");
     }
   }
 
   async function startMusic() {
-    if (!music || userPausedMusic) return;
+    if (!music || userPausedMusic) return false;
+
+    // Avoid multiple simultaneous play() requests.
+    if (musicStartAttemptInProgress) return false;
+
+    if (!music.paused && !music.ended) {
+      musicPlaying = true;
+      updateMusicButton();
+      return true;
+    }
+
+    musicStartAttemptInProgress = true;
 
     try {
       music.loop = true;
       music.volume = 0.65;
 
-      await music.play();
+      const playPromise = music.play();
 
-      musicPlaying = true;
+      if (playPromise !== undefined) {
+        await playPromise;
+      }
+
+      musicPlaying = !music.paused;
       updateMusicButton();
 
-      return true;
+      return musicPlaying;
     } catch (error) {
       musicPlaying = false;
       updateMusicButton();
 
-      console.info(
-        "Autoplay was blocked or the audio could not start.",
+      console.warn(
+        "Music did not start. Check the audio file path and browser playback permissions.",
         error
       );
 
       return false;
+    } finally {
+      musicStartAttemptInProgress = false;
     }
   }
 
@@ -118,12 +137,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     music.pause();
     musicPlaying = false;
-
     updateMusicButton();
   }
 
   /*
-   * ATTEMPT AUTOPLAY AS SOON AS THE PAGE OPENS
+   * PREPARE AUDIO
    */
 
   if (music) {
@@ -131,56 +149,58 @@ document.addEventListener("DOMContentLoaded", () => {
     music.preload = "auto";
     music.volume = 0.65;
 
-    // Browsers may allow autoplay, but may also block it.
+    // Prepare the file without assuming autoplay will be permitted.
+    music.load();
+
+    // Try autoplay. Some browsers will allow it; others will block it.
     startMusic();
 
-    // If autoplay was blocked, retry on the visitor's
-    // first interaction with the page.
-    const retryAutoplay = () => {
-      if (!musicPlaying && !userPausedMusic) {
+    /*
+     * If autoplay is blocked, a real visitor interaction can
+     * give the browser permission to start the soundtrack.
+     */
+    const retryMusic = () => {
+      if (music.paused && !userPausedMusic) {
         startMusic();
       }
-
-      document.removeEventListener("touchstart", retryAutoplay);
-      document.removeEventListener("click", retryAutoplay);
-      document.removeEventListener("keydown", retryAutoplay);
     };
 
-    document.addEventListener(
-      "touchstart",
-      retryAutoplay,
-      { once: true, passive: true }
-    );
+    document.addEventListener("pointerdown", retryMusic, {
+      once: true,
+      passive: true
+    });
 
-    document.addEventListener(
-      "click",
-      retryAutoplay,
-      { once: true }
-    );
+    document.addEventListener("keydown", retryMusic, {
+      once: true
+    });
 
-    document.addEventListener(
-      "keydown",
-      retryAutoplay,
-      { once: true }
-    );
+    /*
+     * MUSIC BUTTON
+     */
 
-    // Keep the music control available.
     if (musicButton) {
       musicButton.addEventListener("click", async (event) => {
+        event.preventDefault();
         event.stopPropagation();
 
-        if (musicPlaying && !music.paused) {
+        if (!music.paused) {
           userPausedMusic = true;
           pauseMusic();
           return;
         }
 
+        // Explicitly tapping Play means the visitor wants music.
         userPausedMusic = false;
+
         await startMusic();
       });
     }
 
-    music.addEventListener("play", () => {
+    /*
+     * KEEP THE BUTTON SYNCHRONIZED WITH THE AUDIO
+     */
+
+    music.addEventListener("playing", () => {
       musicPlaying = true;
       updateMusicButton();
     });
@@ -199,22 +219,26 @@ document.addEventListener("DOMContentLoaded", () => {
       musicPlaying = false;
       updateMusicButton();
 
-      console.warn(
-        "The soundtrack could not load. Check the MP3 path."
+      console.error(
+        "The soundtrack could not load. Verify the MP3 file path and file format."
       );
+    });
+
+    music.addEventListener("canplay", () => {
+      console.info("Hadiya's soundtrack is ready to play.");
     });
   }
 
   /*
    * ENTER THE EXPERIENCE
+   *
+   * Attempt playback directly from the visitor's button tap.
    */
 
   if (enterButton) {
     enterButton.addEventListener("click", async () => {
       showScreen("atm");
 
-      // A button tap is a user interaction, so this is
-      // another opportunity for the browser to allow audio.
       if (music && music.paused && !userPausedMusic) {
         await startMusic();
       }
